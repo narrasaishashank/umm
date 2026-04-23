@@ -40,6 +40,48 @@
         margin-top: 20px;
         font-size: 20px;
     }
+    /* New styles for improved UI */
+    .search-bar {
+        max-width: 720px;
+        margin: 20px auto 10px;
+        position: relative;
+        display: flex;
+        align-items: center;
+        background: rgba(255,255,255,0.12);
+        padding: 12px 14px;
+        border-radius: 8px;
+        backdrop-filter: blur(4px);
+    }
+    .search-bar input {
+        flex: 1;
+        background: transparent;
+        border: none;
+        color: white;
+        font-size: 16px;
+    }
+    .suggestions {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: calc(100% + 6px);
+        background: white;
+        color: #222;
+        border-radius: 6px;
+        max-height: 220px;
+        overflow: auto;
+        box-shadow: 0 6px 18px rgba(0,0,0,0.25);
+        z-index: 20;
+    }
+    .suggestions div {
+        padding: 8px 12px;
+        cursor: pointer;
+    }
+    .suggestions div:hover, .suggestions .active {
+        background: #f0f0f0;
+    }
+    .recent { margin-top: 18px; display:flex; gap:8px; justify-content:center; flex-wrap:wrap }
+    .recent button { background: rgba(255,255,255,0.12); border: none; color: white; padding:8px 12px; border-radius:6px; cursor:pointer }
+    #map { height: 320px; border-radius:8px; margin-top:18px; }
 </style>
 </head>
 
@@ -47,19 +89,31 @@
 
 <div class="container">
     <h1>Weather App</h1>
-    <input type="text" id="city" placeholder="Enter city name">
-    <button onclick="getWeather()">Get Weather</button>
+    <div class="search-bar">
+        <input type="text" id="city" placeholder="Search your Address, City or Zip Code" aria-label="city">
+        <button onclick="getWeather()">Get</button>
+        <div id="suggestions" class="suggestions" style="display:none"></div>
+    </div>
+
+    <div class="recent" id="recent"></div>
 
     <div class="weather-box" id="weather"></div>
+    <div id="map"></div>
 </div>
 
 <script>
 const apiKey = "YOUR_API_KEY";
 
 // Small list of common cities to help with typos; extend as needed.
+// Expanded city list for autocomplete/training data (Indian cities + some large world cities)
 const cityList = [
-    "Hyderabad","Mumbai","Delhi","Bengaluru","Chennai","Kolkata",
-    "Pune","Ahmedabad","Jaipur","Lucknow","Kanpur","Nagpur"
+    "Hyderabad","Hyderbad","Hyderābād","Mumbai","Bombay","Delhi","New Delhi","Bengaluru","Bangalore","Chennai","Kolkata","Calcutta",
+    "Pune","Ahmedabad","Jaipur","Lucknow","Kanpur","Nagpur","Indore","Thane","Bhopal","Visakhapatnam","Patna","Vadodara","Ghaziabad",
+    "Ludhiana","Agra","Nashik","Faridabad","Meerut","Rajkot","Kalyan","Vasai-Virar","Varanasi","Srinagar","Aurangabad","Dhanbad",
+    "Amritsar","Navi Mumbai","Allahabad","Ranchi","Howrah","Coimbatore","Jabalpur","Gwalior","Vijayawada","Jodhpur","Madurai","Raipur",
+    "Kota","Bareilly","Chandigarh","Guwahati","Solapur","Trichy","Tiruppur","Mysore","Hubli","Tirunelveli","Jamshedpur","Salem",
+    "Thiruvananthapuram","Bhubaneswar","Dehradun","Udaipur","Durgapur","Asansol","Nanded","Kolhapur","Ajmer","Jalandhar","Kochi",
+    "London","New York","Los Angeles","Toronto","Sydney","Singapore","Dubai","Karachi","Lahore","Dhaka","Colombo"
 ];
 
 function levenshtein(a, b) {
@@ -103,6 +157,80 @@ function findClosestCity(input) {
     const threshold = Math.max(2, Math.floor(input.length / 4));
     return bestDist <= threshold ? best : null;
 }
+
+// --- Autocomplete UI ---
+const inputEl = document.getElementById('city');
+const suggEl = document.getElementById('suggestions');
+let activeIndex = -1;
+
+function showSuggestions(list) {
+    if (!list || !list.length) { suggEl.style.display='none'; return }
+    suggEl.innerHTML = list.map((s,i)=>`<div data-i="${i}">${s}</div>`).join('');
+    suggEl.style.display='block';
+}
+
+inputEl.addEventListener('input', e => {
+    const v = e.target.value.trim();
+    if (!v) { showSuggestions([]); return }
+    const matches = cityList.filter(c => c.toLowerCase().includes(v.toLowerCase())).slice(0,10);
+    if (matches.length === 0) {
+        const closest = findClosestCity(v);
+        if (closest) matches.push(closest);
+    }
+    showSuggestions(matches);
+    activeIndex = -1;
+});
+
+suggEl.addEventListener('click', e=>{
+    const d = e.target.closest('div[data-i]');
+    if (!d) return;
+    const val = d.textContent;
+    inputEl.value = val;
+    showSuggestions([]);
+    getWeather();
+});
+
+inputEl.addEventListener('keydown', e=>{
+    const items = suggEl.querySelectorAll('div');
+    if (!items.length) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); activeIndex = Math.min(activeIndex+1, items.length-1); updateActive(); }
+    if (e.key === 'ArrowUp') { e.preventDefault(); activeIndex = Math.max(activeIndex-1, 0); updateActive(); }
+    if (e.key === 'Enter') { e.preventDefault(); if (activeIndex>=0) { inputEl.value = items[activeIndex].textContent; showSuggestions([]); } getWeather(); }
+});
+
+function updateActive(){
+    const items = suggEl.querySelectorAll('div');
+    items.forEach(it=>it.classList.remove('active'));
+    if (activeIndex>=0 && items[activeIndex]) items[activeIndex].classList.add('active');
+}
+
+// Recent locations handling
+const recentEl = document.getElementById('recent');
+function loadRecent(){
+    const arr = JSON.parse(localStorage.getItem('recent')||'[]');
+    recentEl.innerHTML = arr.map(c=>`<button onclick="getWeather('${c}')">${c}</button>`).join('');
+}
+function pushRecent(city){
+    if (!city) return;
+    let arr = JSON.parse(localStorage.getItem('recent')||'[]');
+    arr = [city, ...arr.filter(x=>x.toLowerCase()!==city.toLowerCase())].slice(0,6);
+    localStorage.setItem('recent', JSON.stringify(arr));
+    loadRecent();
+}
+
+// --- Map (Leaflet) ---
+const L_css = document.createElement('link');
+L_css.rel='stylesheet';
+L_css.href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+document.head.appendChild(L_css);
+const L_script = document.createElement('script');
+L_script.src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+L_script.onload = ()=>{
+    window._map = L.map('map', {center:[20.5937,78.9629], zoom:4});
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(window._map);
+};
+document.body.appendChild(L_script);
+
 
 async function getWeather(overrideCity) {
     const city = (overrideCity || document.getElementById("city").value).trim();
