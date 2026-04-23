@@ -56,15 +56,74 @@
 <script>
 const apiKey = "YOUR_API_KEY";
 
-async function getWeather() {
-    const city = document.getElementById("city").value;
-    const url = `https://api.openweathermap.org/data/2.5/weather?q=${city}&units=metric&appid=${apiKey}`;
+// Small list of common cities to help with typos; extend as needed.
+const cityList = [
+    "Hyderabad","Mumbai","Delhi","Bengaluru","Chennai","Kolkata",
+    "Pune","Ahmedabad","Jaipur","Lucknow","Kanpur","Nagpur"
+];
+
+function levenshtein(a, b) {
+    if (!a.length) return b.length;
+    if (!b.length) return a.length;
+    const matrix = [];
+    for (let i = 0; i <= b.length; i++) {
+        matrix[i] = [i];
+    }
+    for (let j = 0; j <= a.length; j++) {
+        matrix[0][j] = j;
+    }
+    for (let i = 1; i <= b.length; i++) {
+        for (let j = 1; j <= a.length; j++) {
+            if (b.charAt(i - 1).toLowerCase() === a.charAt(j - 1).toLowerCase()) {
+                matrix[i][j] = matrix[i - 1][j - 1];
+            } else {
+                matrix[i][j] = Math.min(
+                    matrix[i - 1][j - 1] + 1,
+                    matrix[i][j - 1] + 1,
+                    matrix[i - 1][j] + 1
+                );
+            }
+        }
+    }
+    return matrix[b.length][a.length];
+}
+
+function findClosestCity(input) {
+    if (!input) return null;
+    let best = null;
+    let bestDist = Infinity;
+    for (const c of cityList) {
+        const d = levenshtein(input.toLowerCase(), c.toLowerCase());
+        if (d < bestDist) {
+            bestDist = d;
+            best = c;
+        }
+    }
+    // allow small typo corrections only
+    const threshold = Math.max(2, Math.floor(input.length / 4));
+    return bestDist <= threshold ? best : null;
+}
+
+async function getWeather(overrideCity) {
+    const city = (overrideCity || document.getElementById("city").value).trim();
+    if (!city) {
+        document.getElementById("weather").innerHTML = "Please enter a city name";
+        return;
+    }
+
+    const url = `https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(city)}&units=metric&appid=${apiKey}`;
 
     try {
         const response = await fetch(url);
         const data = await response.json();
 
         if (data.cod !== 200) {
+            const suggestion = findClosestCity(city);
+            if (suggestion && suggestion.toLowerCase() !== city.toLowerCase()) {
+                document.getElementById("weather").innerHTML = `City not found. Showing results for <strong>${suggestion}</strong>...`;
+                document.getElementById("city").value = suggestion;
+                return getWeather(suggestion);
+            }
             document.getElementById("weather").innerHTML = "City not found";
             return;
         }
